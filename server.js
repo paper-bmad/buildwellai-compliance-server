@@ -5,7 +5,7 @@ import { randomUUID } from 'crypto';
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '20mb' })); // allow base64 image payloads
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -174,8 +174,124 @@ function buildUserPrompt(query) {
   return lines.join('\n');
 }
 
+const VISION_SYSTEM_PROMPT = `You are an expert architectural drawing analyst specialising in UK Building Regulations. When shown an architectural drawing, you extract building parameters and identify compliance considerations.
+
+DRAWING TYPES: floor_plan, elevation, section, site_plan, detail, schedule, unknown
+
+EXTRACTION RULES:
+- Be conservative with numerical estimates; prefer null over a wild guess
+- For GFA: estimate from floor plan dimensions if visible; multiply by storeys for total
+- For occupancy: estimate ~1 person per 15m² for residential, ~1 per 10m² for commercial
+- Construction type: infer from wall hatching, structural grid, section details
+- Compliance risks: only flag items VISIBLE in the drawing, not hypothetical concerns
+
+VALID CONSTRUCTION TYPES (use exactly):
+"Timber Frame", "Masonry", "Steel Frame", "Concrete Frame", "Cross Laminated Timber"
+
+VALID BUILDING USES (use exactly):
+"Residential", "Commercial", "Mixed Use", "Industrial", "Education", "Healthcare"
+
+You MUST return ONLY valid JSON. No markdown, no explanation outside the JSON.`;
+
+const VISION_EXTRACT_PROMPT = `Analyze this architectural drawing and return a single JSON object with this exact structure:
+
+{
+  "classification": {
+    "drawing_type": "<floor_plan|elevation|section|site_plan|detail|schedule|unknown>",
+    "confidence": <0.0-1.0>,
+    "scale": "<detected scale or null>",
+    "north_arrow_present": <true|false>,
+    "notes": "<brief observation>"
+  },
+  "buildingParameters": {
+    "buildingUse": "<Residential|Commercial|Mixed Use|Industrial|Education|Healthcare>",
+    "constructionType": "<Timber Frame|Masonry|Steel Frame|Concrete Frame|Cross Laminated Timber>",
+    "numberOfStoreys": <integer, minimum 1>,
+    "floorAreaM2": <integer GFA in m², minimum 10>,
+    "occupancyEstimate": <integer, minimum 1>,
+    "hasBasement": <true|false>,
+    "hasAtrium": <true|false>
+  },
+  "complianceRisks": [
+    {
+      "regulation": "<Approved Document clause e.g. Doc B §B1>",
+      "observation": "<what is visible in the drawing>",
+      "riskLevel": "<low|medium|high>",
+      "action": "<recommended action>"
+    }
+  ],
+  "extractionConfidence": <0.0-1.0>,
+  "extractionNotes": "<any caveats about the extraction>"
+}`;
+
+function normalizeConstructionType(description) {
+  if (!description) return 'Masonry';
+  const desc = description.toLowerCase();
+  if (desc.includes('clt') || desc.includes('cross laminated') || desc.includes('cross-laminated')) return 'Cross Laminated Timber';
+  if (desc.includes('timber') || desc.includes('wood') || desc.includes('lumber')) return 'Timber Frame';
+  if (desc.includes('steel') || desc.includes('metal frame')) return 'Steel Frame';
+  if (desc.includes('concrete') || desc.includes('rc ') || desc.includes('reinforced') || desc.includes('precast')) return 'Concrete Frame';
+  if (desc.includes('masonry') || desc.includes('brick') || desc.includes('block') || desc.includes('stone')) return 'Masonry';
+  return 'Masonry';
+}
+
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', version: '1.0.0' });
+  res.json({ status: 'ok', version: '1.1.0', endpoints: ['/health', '/check', '/analyze'] });
+});
+
+app.post('/analyze', async (req, res) => {
+  const { imageBase64, mediaType = 'image/png', additionalContext } = req.body;
+  if (!imageBase64) {
+    return res.status(400).json({ error: 'Missing imageBase64 field' });
+  }
+
+  try {
+    const imageContent = {
+      type: 'image',
+      source: { type: 'base64', media_type: mediaType, data: imageBase64 },
+    };
+
+    const userContent = [imageContent, { type: 'text', text: VISION_EXTRACT_PROMPT }];
+    if (additionalContext) {
+      userContent.push({ type: 'text', text: `Additional context: ${additionalContext}` });
+    }
+
+    const message = await anthropic.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 2048,
+      system: [
+        {
+          type: 'text',
+          text: VISION_SYSTEM_PROMPT,
+          cache_control: { type: 'ephemeral' },
+        },
+      ],
+      messages: [{ role: 'user', content: userContent }],
+    });
+
+    const raw = message.content[0].text.trim();
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      const jsonMatch = raw.match(/\{[\s\S]+\}/);
+      if (!jsonMatch) throw new Error('No JSON found in vision response');
+      parsed = JSON.parse(jsonMatch[0]);
+    }
+
+    // Normalize construction type in case Claude returned free text
+    if (parsed.buildingParameters?.constructionType) {
+      const VALID_CONSTRUCTION = ['Timber Frame', 'Masonry', 'Steel Frame', 'Concrete Frame', 'Cross Laminated Timber'];
+      if (!VALID_CONSTRUCTION.includes(parsed.buildingParameters.constructionType)) {
+        parsed.buildingParameters.constructionType = normalizeConstructionType(parsed.buildingParameters.constructionType);
+      }
+    }
+
+    res.json(parsed);
+  } catch (err) {
+    console.error('Vision analysis error:', err);
+    res.status(500).json({ error: err.message || 'Internal server error' });
+  }
 });
 
 app.post('/check', async (req, res) => {
