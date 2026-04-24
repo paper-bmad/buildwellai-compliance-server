@@ -153,8 +153,30 @@ const REPORT_SCHEMA = {
   required: ['overallStatus', 'domains', 'recommendations', 'regulationDocuments'],
 };
 
+const DOMAIN_TO_DOCUMENT = {
+  fire_safety:  'Approved Document B (Fire Safety)',
+  ventilation:  'Approved Document F (Ventilation)',
+  structural:   'Approved Document A (Structure)',
+  energy:       'Approved Document L (Conservation of Fuel and Power)',
+  overheating:  'Approved Document O (Overheating)',
+  acoustics:    'Approved Document E (Resistance to Sound)',
+  sap:          'SAP 10.2 (Standard Assessment Procedure)',
+  drainage:     'Approved Document H (Drainage and Waste Disposal)',
+  access:       'Approved Document M (Access to and Use of Buildings)',
+  electrical:   'Approved Document P (Electrical Safety)',
+  security:     'Approved Document Q (Security)',
+  site_prep:    'Approved Document C (Site Preparation and Resistance to Contaminants)',
+  sanitation:   'Approved Document G (Sanitation, Hot Water Safety and Water Efficiency)',
+  falling:      'Approved Document K (Protection from Falling, Collision and Impact)',
+  broadband:    'Approved Document R (Physical Infrastructure for High-Speed Electronic Communications)',
+  ev_charging:  'Approved Document S (Infrastructure for the Charging of Electric Vehicles)',
+};
+
 function buildUserPrompt(query) {
   const bp = query.buildingParameters;
+  const domainList = query.domains
+    .map(d => `  - ${d} → ${DOMAIN_TO_DOCUMENT[d] || d}`)
+    .join('\n');
   const lines = [
     `Building Parameters:`,
     `- Use: ${bp.buildingUse}`,
@@ -165,12 +187,13 @@ function buildUserPrompt(query) {
     `- Has basement: ${bp.hasBasement}`,
     `- Has atrium: ${bp.hasAtrium}`,
     ``,
-    `Domains to assess: ${query.domains.join(', ')}`,
+    `Domains to assess (key → Approved Document):`,
+    domainList,
   ];
   if (query.additionalContext) {
     lines.push(``, `Additional context: ${query.additionalContext}`);
   }
-  lines.push(``, `Return a JSON object matching the ComplianceReport schema with detailed clause-level assessment for each domain.`);
+  lines.push(``, `Return a JSON object matching the ComplianceReport schema with detailed clause-level assessment for each domain. Use the domain key (e.g. "fire_safety") as the domain field value.`);
   return lines.join('\n');
 }
 
@@ -236,7 +259,13 @@ function normalizeConstructionType(description) {
 }
 
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', version: '1.1.0', endpoints: ['/health', '/check', '/analyze'] });
+  res.json({ status: 'ok', version: '1.2.0', endpoints: ['/health', '/domains', '/check', '/analyze'] });
+});
+
+app.get('/domains', (_req, res) => {
+  res.json({
+    domains: Object.entries(DOMAIN_TO_DOCUMENT).map(([key, document]) => ({ key, document })),
+  });
 });
 
 app.post('/analyze', async (req, res) => {
