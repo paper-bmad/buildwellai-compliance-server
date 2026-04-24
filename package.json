@@ -1,6 +1,6 @@
 {
   "name": "bw-compliance-server",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "BuildwellAI UK Building Regulations compliance API",
   "type": "module",
   "main": "server.js",

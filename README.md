@@ -93,6 +93,7 @@ Response (`ComplianceReport`):
 |----------|----------|-------------|
 | `ANTHROPIC_API_KEY` | Yes | Anthropic API key |
 | `PORT` | No | Server port (default: 3001) |
+| `ALLOWED_ORIGINS` | No | Comma-separated CORS allowlist (e.g. `https://app.buildwellai.com,http://localhost:5173`). Unset = allow all origins. |
 
 ## Integration with SiteInspectionApp
 
@@ -199,6 +200,10 @@ const decoder = new TextDecoder();
 The full UK Approved Documents reference (~3000 tokens) is cached using `cache_control: { type: 'ephemeral' }`. Cache TTL is 5 minutes. On cache hits, API cost and latency are significantly reduced — optimal for repeated compliance checks in a session.
 
 ## Changelog
+
+### v1.4.0
+- Configurable CORS origin allowlist via `ALLOWED_ORIGINS` env var — unset allows all origins (development default), set restricts to listed origins for production
+- Server-to-server requests (no `Origin` header) always pass through
 
 ### v1.3.0
 - Input validation on `POST /check` and `POST /check/stream`: validates all `buildingParameters` fields (type + range), domain keys against known set, and trims `additionalContext` to 1000 chars

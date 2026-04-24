@@ -4,7 +4,25 @@ import Anthropic from '@anthropic-ai/sdk';
 import { randomUUID } from 'crypto';
 
 const app = express();
-app.use(cors());
+
+// CORS: restrict to known origins when ALLOWED_ORIGINS is set.
+// Comma-separated list, e.g. "https://app.buildwellai.com,http://localhost:5173"
+// Unset → allow all (development default).
+const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
+  ? new Set(process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim()))
+  : null;
+
+app.use(cors({
+  origin: ALLOWED_ORIGINS
+    ? (origin, cb) => {
+        // Allow requests with no origin (server-to-server, curl)
+        if (!origin || ALLOWED_ORIGINS.has(origin)) return cb(null, true);
+        cb(new Error(`CORS: origin '${origin}' not allowed`));
+      }
+    : true,
+  methods: ['GET', 'POST', 'OPTIONS'],
+}));
+
 app.use(express.json({ limit: '20mb' })); // allow base64 image payloads
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -309,7 +327,7 @@ function normalizeConstructionType(description) {
 }
 
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', version: '1.3.0', endpoints: ['/health', '/domains', '/check', '/check/stream', '/analyze'] });
+  res.json({ status: 'ok', version: '1.4.0', endpoints: ['/health', '/domains', '/check', '/check/stream', '/analyze'] });
 });
 
 app.get('/domains', (_req, res) => {
