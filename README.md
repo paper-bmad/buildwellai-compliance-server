@@ -21,7 +21,7 @@ Server starts on port 3001 (or `$PORT`).
 
 ### `GET /health`
 ```json
-{ "status": "ok", "version": "1.1.0" }
+{ "status": "ok", "version": "1.2.0", "endpoints": ["/health", "/domains", "/check", "/check/stream", "/analyze"] }
 ```
 
 ### `GET /domains`
