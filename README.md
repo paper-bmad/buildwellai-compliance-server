@@ -94,6 +94,8 @@ Response (`ComplianceReport`):
 | `ANTHROPIC_API_KEY` | Yes | Anthropic API key |
 | `PORT` | No | Server port (default: 3001) |
 | `ALLOWED_ORIGINS` | No | Comma-separated CORS allowlist (e.g. `https://app.buildwellai.com,http://localhost:5173`). Unset = allow all origins. |
+| `RATE_LIMIT_RPM` | No | Per-IP rate limit for `/check` and `/check/stream` (requests/min, default: 10). Set to 0 to disable. |
+| `RATE_LIMIT_ANALYZE_RPM` | No | Per-IP rate limit for `/analyze` (requests/min, default: 5). Set to 0 to disable. |
 
 ## Integration with SiteInspectionApp
 
@@ -200,6 +202,9 @@ const decoder = new TextDecoder();
 The full UK Approved Documents reference (~3000 tokens) is cached using `cache_control: { type: 'ephemeral' }`. Cache TTL is 5 minutes. On cache hits, API cost and latency are significantly reduced — optimal for repeated compliance checks in a session.
 
 ## Changelog
+
+### v1.5.0
+- Per-IP sliding-window rate limiting on inference endpoints: `RATE_LIMIT_RPM` (default 10/min) for `/check` + `/check/stream`, `RATE_LIMIT_ANALYZE_RPM` (default 5/min) for `/analyze`. Returns `429` with `Retry-After` header when exceeded. Set to `0` to disable. Rate limit config exposed in `/health` response.
 
 ### v1.4.0
 - Configurable CORS origin allowlist via `ALLOWED_ORIGINS` env var — unset allows all origins (development default), set restricts to listed origins for production

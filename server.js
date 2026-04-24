@@ -25,6 +25,35 @@ app.use(cors({
 
 app.use(express.json({ limit: '20mb' })); // allow base64 image payloads
 
+// Sliding-window rate limiter for inference endpoints.
+// RATE_LIMIT_RPM controls /check and /check/stream (default 10/min per IP).
+// RATE_LIMIT_ANALYZE_RPM controls /analyze (default 5/min per IP).
+// Set to 0 to disable.
+const RATE_LIMIT_RPM = parseInt(process.env.RATE_LIMIT_RPM ?? '10', 10);
+const RATE_LIMIT_ANALYZE_RPM = parseInt(process.env.RATE_LIMIT_ANALYZE_RPM ?? '5', 10);
+const _rateLimitWindows = new Map(); // ip+endpoint → [timestamp, ...]
+
+function makeRateLimiter(limitRpm) {
+  if (limitRpm === 0) return (_req, _res, next) => next();
+  return (req, res, next) => {
+    const key = `${req.ip}:${req.path}`;
+    const now = Date.now();
+    const windowMs = 60_000;
+    const timestamps = (_rateLimitWindows.get(key) ?? []).filter(t => now - t < windowMs);
+    if (timestamps.length >= limitRpm) {
+      const retryAfter = Math.ceil((windowMs - (now - timestamps[0])) / 1000);
+      res.set('Retry-After', String(retryAfter));
+      return res.status(429).json({ error: 'Rate limit exceeded', retryAfterSeconds: retryAfter });
+    }
+    timestamps.push(now);
+    _rateLimitWindows.set(key, timestamps);
+    next();
+  };
+}
+
+const checkRateLimit = makeRateLimiter(RATE_LIMIT_RPM);
+const analyzeRateLimit = makeRateLimiter(RATE_LIMIT_ANALYZE_RPM);
+
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const REGULATIONS_SYSTEM_PROMPT = `You are a UK Building Regulations compliance expert. Given building parameters and a list of regulation domains, you evaluate compliance against the relevant Approved Documents and return a structured JSON report.
@@ -327,7 +356,14 @@ function normalizeConstructionType(description) {
 }
 
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', version: '1.4.0', endpoints: ['/health', '/domains', '/check', '/check/stream', '/analyze'] });
+  res.json({
+    status: 'ok', version: '1.5.0',
+    endpoints: ['/health', '/domains', '/check', '/check/stream', '/analyze'],
+    rateLimits: {
+      check: RATE_LIMIT_RPM === 0 ? 'disabled' : `${RATE_LIMIT_RPM}/min`,
+      analyze: RATE_LIMIT_ANALYZE_RPM === 0 ? 'disabled' : `${RATE_LIMIT_ANALYZE_RPM}/min`,
+    },
+  });
 });
 
 app.get('/domains', (_req, res) => {
@@ -336,7 +372,7 @@ app.get('/domains', (_req, res) => {
   });
 });
 
-app.post('/analyze', async (req, res) => {
+app.post('/analyze', analyzeRateLimit, async (req, res) => {
   const { imageBase64, mediaType = 'image/png', additionalContext } = req.body;
   if (!imageBase64) {
     return res.status(400).json({ error: 'Missing imageBase64 field' });
@@ -391,7 +427,7 @@ app.post('/analyze', async (req, res) => {
   }
 });
 
-app.post('/check', async (req, res) => {
+app.post('/check', checkRateLimit, async (req, res) => {
   const query = req.body;
   const validationErrors = validateCheckRequest(query);
   if (validationErrors.length > 0) {
@@ -448,7 +484,7 @@ function sseWrite(res, event, data) {
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
-app.post('/check/stream', async (req, res) => {
+app.post('/check/stream', checkRateLimit, async (req, res) => {
   const query = req.body;
   const validationErrors = validateCheckRequest(query);
   if (validationErrors.length > 0) {

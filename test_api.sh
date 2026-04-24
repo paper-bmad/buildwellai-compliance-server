@@ -24,7 +24,7 @@ echo "---"
 # GET /health
 health=$(curl -sf "$BASE/health" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['status'], d['version'])")
 check "GET /health status" "$(echo $health | cut -d' ' -f1)" "ok"
-check "GET /health version" "$(echo $health | cut -d' ' -f2)" "1.4.0"
+check "GET /health version" "$(echo $health | cut -d' ' -f2)" "1.5.0"
 
 # GET /domains
 domain_count=$(curl -sf "$BASE/domains" | python3 -c "import sys,json; print(len(json.load(sys.stdin)['domains']))")
