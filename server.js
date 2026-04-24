@@ -247,6 +247,56 @@ const VISION_EXTRACT_PROMPT = `Analyze this architectural drawing and return a s
   "extractionNotes": "<any caveats about the extraction>"
 }`;
 
+const VALID_BUILDING_USES = new Set(['Residential', 'Commercial', 'Mixed Use', 'Industrial', 'Education', 'Healthcare']);
+const VALID_CONSTRUCTION_TYPES = new Set(['Timber Frame', 'Masonry', 'Steel Frame', 'Concrete Frame', 'Cross Laminated Timber']);
+const VALID_DOMAINS = new Set(Object.keys(DOMAIN_TO_DOCUMENT));
+
+function validateCheckRequest(query) {
+  const errors = [];
+
+  if (!query?.buildingParameters || typeof query.buildingParameters !== 'object') {
+    errors.push('buildingParameters is required and must be an object');
+    return errors; // can't validate fields without the object
+  }
+
+  const bp = query.buildingParameters;
+  if (!VALID_BUILDING_USES.has(bp.buildingUse)) {
+    errors.push(`buildingUse must be one of: ${[...VALID_BUILDING_USES].join(', ')}`);
+  }
+  if (!VALID_CONSTRUCTION_TYPES.has(bp.constructionType)) {
+    errors.push(`constructionType must be one of: ${[...VALID_CONSTRUCTION_TYPES].join(', ')}`);
+  }
+  if (!Number.isInteger(bp.numberOfStoreys) || bp.numberOfStoreys < 1 || bp.numberOfStoreys > 100) {
+    errors.push('numberOfStoreys must be an integer between 1 and 100');
+  }
+  if (typeof bp.floorAreaM2 !== 'number' || bp.floorAreaM2 < 1 || bp.floorAreaM2 > 1_000_000) {
+    errors.push('floorAreaM2 must be a positive number');
+  }
+  if (!Number.isInteger(bp.occupancyEstimate) || bp.occupancyEstimate < 1 || bp.occupancyEstimate > 100_000) {
+    errors.push('occupancyEstimate must be a positive integer');
+  }
+  if (typeof bp.hasBasement !== 'boolean') {
+    errors.push('hasBasement must be a boolean');
+  }
+  if (typeof bp.hasAtrium !== 'boolean') {
+    errors.push('hasAtrium must be a boolean');
+  }
+
+  if (!Array.isArray(query.domains) || query.domains.length === 0) {
+    errors.push('domains must be a non-empty array');
+  } else {
+    const unknown = query.domains.filter(d => !VALID_DOMAINS.has(d));
+    if (unknown.length > 0) {
+      errors.push(`unknown domain keys: ${unknown.join(', ')}. Valid keys: ${[...VALID_DOMAINS].join(', ')}`);
+    }
+    if (query.domains.length > 16) {
+      errors.push('domains must contain at most 16 items');
+    }
+  }
+
+  return errors;
+}
+
 function normalizeConstructionType(description) {
   if (!description) return 'Masonry';
   const desc = description.toLowerCase();
@@ -259,7 +309,7 @@ function normalizeConstructionType(description) {
 }
 
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', version: '1.2.0', endpoints: ['/health', '/domains', '/check', '/check/stream', '/analyze'] });
+  res.json({ status: 'ok', version: '1.3.0', endpoints: ['/health', '/domains', '/check', '/check/stream', '/analyze'] });
 });
 
 app.get('/domains', (_req, res) => {
@@ -325,9 +375,11 @@ app.post('/analyze', async (req, res) => {
 
 app.post('/check', async (req, res) => {
   const query = req.body;
-  if (!query?.buildingParameters || !Array.isArray(query?.domains)) {
-    return res.status(400).json({ error: 'Missing buildingParameters or domains' });
+  const validationErrors = validateCheckRequest(query);
+  if (validationErrors.length > 0) {
+    return res.status(400).json({ error: 'Invalid request', details: validationErrors });
   }
+  if (query.additionalContext) query.additionalContext = String(query.additionalContext).slice(0, 1000);
 
   try {
     const message = await anthropic.messages.create({
@@ -380,9 +432,11 @@ function sseWrite(res, event, data) {
 
 app.post('/check/stream', async (req, res) => {
   const query = req.body;
-  if (!query?.buildingParameters || !Array.isArray(query?.domains)) {
-    return res.status(400).json({ error: 'Missing buildingParameters or domains' });
+  const validationErrors = validateCheckRequest(query);
+  if (validationErrors.length > 0) {
+    return res.status(400).json({ error: 'Invalid request', details: validationErrors });
   }
+  if (query.additionalContext) query.additionalContext = String(query.additionalContext).slice(0, 1000);
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');

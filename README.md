@@ -21,7 +21,7 @@ Server starts on port 3001 (or `$PORT`).
 
 ### `GET /health`
 ```json
-{ "status": "ok", "version": "1.2.0", "endpoints": ["/health", "/domains", "/check", "/check/stream", "/analyze"] }
+{ "status": "ok", "version": "1.3.0", "endpoints": ["/health", "/domains", "/check", "/check/stream", "/analyze"] }
 ```
 
 ### `GET /domains`
@@ -199,6 +199,11 @@ const decoder = new TextDecoder();
 The full UK Approved Documents reference (~3000 tokens) is cached using `cache_control: { type: 'ephemeral' }`. Cache TTL is 5 minutes. On cache hits, API cost and latency are significantly reduced — optimal for repeated compliance checks in a session.
 
 ## Changelog
+
+### v1.3.0
+- Input validation on `POST /check` and `POST /check/stream`: validates all `buildingParameters` fields (type + range), domain keys against known set, and trims `additionalContext` to 1000 chars
+- Bad requests return `400 { error, details: string[] }` instead of passing through to Claude
+- Smoke test (`test_api.sh`) extended with two validation-path tests (no API key required)
 
 ### v1.2.0
 - Added `POST /analyze` — architectural drawing analysis using Claude vision (base64 image in, building parameters + compliance risks out)

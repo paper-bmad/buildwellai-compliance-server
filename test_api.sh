@@ -30,6 +30,18 @@ check "GET /health version" "$(echo $health | cut -d' ' -f2)" "1.2.0"
 domain_count=$(curl -sf "$BASE/domains" | python3 -c "import sys,json; print(len(json.load(sys.stdin)['domains']))")
 check "GET /domains count" "$domain_count" "16"
 
+# POST /check — validation rejects unknown domain key (no API key needed)
+bad_status=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/check" \
+  -H "Content-Type: application/json" \
+  -d '{"buildingParameters":{"buildingUse":"Residential","constructionType":"Masonry","numberOfStoreys":2,"floorAreaM2":120,"occupancyEstimate":4,"hasBasement":false,"hasAtrium":false},"domains":["unknown_domain"]}')
+check "POST /check rejects unknown domain (400)" "$bad_status" "400"
+
+# POST /check — validation rejects invalid buildingUse (no API key needed)
+bad_use=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/check" \
+  -H "Content-Type: application/json" \
+  -d '{"buildingParameters":{"buildingUse":"Warehouse","constructionType":"Masonry","numberOfStoreys":1,"floorAreaM2":200,"occupancyEstimate":5,"hasBasement":false,"hasAtrium":false},"domains":["fire_safety"]}')
+check "POST /check rejects invalid buildingUse (400)" "$bad_use" "400"
+
 # POST /check (requires API key)
 if [ -n "$ANTHROPIC_API_KEY" ]; then
   status=$(curl -sf -X POST "$BASE/check" \
