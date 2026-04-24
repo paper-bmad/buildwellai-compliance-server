@@ -259,7 +259,7 @@ function normalizeConstructionType(description) {
 }
 
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', version: '1.2.0', endpoints: ['/health', '/domains', '/check', '/analyze'] });
+  res.json({ status: 'ok', version: '1.2.0', endpoints: ['/health', '/domains', '/check', '/check/stream', '/analyze'] });
 });
 
 app.get('/domains', (_req, res) => {
@@ -370,6 +370,168 @@ app.post('/check', async (req, res) => {
   } catch (err) {
     console.error('Compliance check error:', err);
     res.status(500).json({ error: err.message || 'Internal server error' });
+  }
+});
+
+const ANALYZE_SYSTEM_PROMPT = `You are a UK Building Regulations expert analysing architectural drawings. Given a building drawing image, you:
+1. Classify the drawing type
+2. Extract building parameters for compliance assessment
+3. Identify visible compliance risks
+
+Return ONLY a valid JSON object with this exact structure:
+{
+  "classification": {
+    "drawing_type": "<floor_plan|elevation|section|site_plan|detail|schedule|unknown>",
+    "confidence": <0.0-1.0>,
+    "scale": "<scale string or null>",
+    "north_arrow_present": <true|false>,
+    "notes": "<brief observation>"
+  },
+  "buildingParameters": {
+    "buildingUse": "<Residential|Commercial|Mixed Use|Industrial|Education|Healthcare>",
+    "constructionType": "<Timber Frame|Masonry|Steel Frame|Concrete Frame|Cross Laminated Timber>",
+    "numberOfStoreys": <integer>,
+    "floorAreaM2": <number>,
+    "occupancyEstimate": <integer>,
+    "hasBasement": <true|false>,
+    "hasAtrium": <true|false>
+  },
+  "complianceRisks": [
+    {
+      "regulation": "<Doc X clause>",
+      "observation": "<what was observed in the drawing>",
+      "riskLevel": "<low|medium|high>",
+      "action": "<recommended action>"
+    }
+  ],
+  "extractionConfidence": <0.0-1.0>,
+  "extractionNotes": "<overall notes about what could and could not be determined>"
+}
+
+For buildingParameters: use best estimates from visual cues. Default constructionType to 'Masonry' when unclear. Estimate floorAreaM2 from scale if available. Set occupancyEstimate = max(1, floor(floorAreaM2 / 15)).`;
+
+app.post('/analyze', async (req, res) => {
+  const { imageBase64, mediaType } = req.body;
+  if (!imageBase64 || !mediaType) {
+    return res.status(400).json({ error: 'Missing imageBase64 or mediaType' });
+  }
+
+  try {
+    const message = await anthropic.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 2048,
+      system: [
+        {
+          type: 'text',
+          text: ANALYZE_SYSTEM_PROMPT,
+          cache_control: { type: 'ephemeral' },
+        },
+      ],
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: mediaType,
+                data: imageBase64,
+              },
+            },
+            {
+              type: 'text',
+              text: 'Analyse this architectural drawing and return the JSON object as specified.',
+            },
+          ],
+        },
+      ],
+    });
+
+    const raw = message.content[0].text.trim();
+    let analysis;
+    try {
+      analysis = JSON.parse(raw);
+    } catch {
+      const jsonMatch = raw.match(/\{[\s\S]+\}/);
+      if (!jsonMatch) throw new Error('No JSON found in response');
+      analysis = JSON.parse(jsonMatch[0]);
+    }
+
+    res.json(analysis);
+  } catch (err) {
+    console.error('Drawing analysis error:', err);
+    res.status(500).json({ error: err.message || 'Internal server error' });
+  }
+});
+
+// SSE helper
+function sseWrite(res, event, data) {
+  res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+}
+
+app.post('/check/stream', async (req, res) => {
+  const query = req.body;
+  if (!query?.buildingParameters || !Array.isArray(query?.domains)) {
+    return res.status(400).json({ error: 'Missing buildingParameters or domains' });
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  sseWrite(res, 'start', { domains: query.domains, totalDomains: query.domains.length });
+
+  try {
+    let accumulatedText = '';
+
+    const stream = anthropic.messages.stream({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 4096,
+      system: [
+        {
+          type: 'text',
+          text: REGULATIONS_SYSTEM_PROMPT,
+          cache_control: { type: 'ephemeral' },
+        },
+      ],
+      messages: [{ role: 'user', content: buildUserPrompt(query) }],
+    });
+
+    // Stream raw text chunks so the client can show live generation
+    stream.on('text', (chunk) => {
+      accumulatedText += chunk;
+      sseWrite(res, 'chunk', { text: chunk });
+    });
+
+    await stream.finalMessage();
+
+    // Parse and emit the completed report
+    let reportCore;
+    const raw = accumulatedText.trim();
+    try {
+      reportCore = JSON.parse(raw);
+    } catch {
+      const jsonMatch = raw.match(/\{[\s\S]+\}/);
+      if (!jsonMatch) throw new Error('No JSON found in response');
+      reportCore = JSON.parse(jsonMatch[0]);
+    }
+
+    const report = {
+      id: `report-${randomUUID()}`,
+      queryId: query.id || `query-${randomUUID()}`,
+      projectId: query.projectId,
+      generatedAt: new Date().toISOString(),
+      ...reportCore,
+    };
+
+    sseWrite(res, 'complete', { report });
+    res.end();
+  } catch (err) {
+    console.error('Streaming compliance check error:', err);
+    sseWrite(res, 'error', { message: err.message || 'Internal server error' });
+    res.end();
   }
 });
 
