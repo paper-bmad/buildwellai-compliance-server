@@ -217,6 +217,9 @@ const DOMAIN_TO_DOCUMENT = {
   falling:      'Approved Document K (Protection from Falling, Collision and Impact)',
   broadband:    'Approved Document R (Physical Infrastructure for High-Speed Electronic Communications)',
   ev_charging:  'Approved Document S (Infrastructure for the Charging of Electric Vehicles)',
+  insulation:   'Approved Document D (Cavity Insulation)',
+  combustion:   'Approved Document J (Combustion Appliances and Fuel Storage Systems)',
+  glazing:      'Approved Document N (Glazing — Safety in Relation to Impact, Opening and Cleaning)',
 };
 
 function buildUserPrompt(query) {
@@ -357,7 +360,7 @@ function normalizeConstructionType(description) {
 
 app.get('/health', (_req, res) => {
   res.json({
-    status: 'ok', version: '1.5.0',
+    status: 'ok', version: '1.6.0',
     endpoints: ['/health', '/domains', '/check', '/check/stream', '/analyze'],
     rateLimits: {
       check: RATE_LIMIT_RPM === 0 ? 'disabled' : `${RATE_LIMIT_RPM}/min`,

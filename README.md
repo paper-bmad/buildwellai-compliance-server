@@ -4,7 +4,7 @@ Express.js server that performs UK Building Regulations compliance assessment us
 
 ## Overview
 
-`POST /check` accepts building parameters and regulation domains, returns a structured compliance report covering all 16 UK Approved Document domains: A, B, C, E, F, G, H, K, L, M, O, P, Q, R, S and SAP 10.2.
+`POST /check` accepts building parameters and regulation domains, returns a structured compliance report covering 19 UK Approved Document domains: A, B, C, D, E, F, G, H, J, K, L, M, N, O, P, Q, R, S and SAP 10.2.
 
 The full UK Approved Documents reference (~3000 tokens) is cached as a system prompt — Claude reuses the cache across requests, reducing cost and latency significantly.
 
@@ -196,12 +196,19 @@ const decoder = new TextDecoder();
 | `falling` | Doc K — Protection from Falling |
 | `broadband` | Doc R — Physical Infrastructure (Broadband) |
 | `ev_charging` | Doc S — EV Charging Infrastructure |
+| `insulation` | Doc D — Cavity Insulation |
+| `combustion` | Doc J — Combustion Appliances and Fuel Storage |
+| `glazing` | Doc N — Glazing (Safety in Relation to Impact, Opening, Cleaning) |
 
 ## Prompt Caching
 
 The full UK Approved Documents reference (~3000 tokens) is cached using `cache_control: { type: 'ephemeral' }`. Cache TTL is 5 minutes. On cache hits, API cost and latency are significantly reduced — optimal for repeated compliance checks in a session.
 
 ## Changelog
+
+### v1.6.0
+- Added 3 Approved Document domains to `DOMAIN_TO_DOCUMENT`: `insulation` (Doc D), `combustion` (Doc J), `glazing` (Doc N). Server's regulations system prompt already covered these — this exposes them through the `/check` and `/domains` APIs.
+- `/domains` now returns 19 keys (was 16). Smoke test updated.
 
 ### v1.5.0
 - Per-IP sliding-window rate limiting on inference endpoints: `RATE_LIMIT_RPM` (default 10/min) for `/check` + `/check/stream`, `RATE_LIMIT_ANALYZE_RPM` (default 5/min) for `/analyze`. Returns `429` with `Retry-After` header when exceeded. Set to `0` to disable. Rate limit config exposed in `/health` response.

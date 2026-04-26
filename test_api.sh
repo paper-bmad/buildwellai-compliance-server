@@ -24,11 +24,11 @@ echo "---"
 # GET /health
 health=$(curl -sf "$BASE/health" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['status'], d['version'])")
 check "GET /health status" "$(echo $health | cut -d' ' -f1)" "ok"
-check "GET /health version" "$(echo $health | cut -d' ' -f2)" "1.5.0"
+check "GET /health version" "$(echo $health | cut -d' ' -f2)" "1.6.0"
 
 # GET /domains
 domain_count=$(curl -sf "$BASE/domains" | python3 -c "import sys,json; print(len(json.load(sys.stdin)['domains']))")
-check "GET /domains count" "$domain_count" "16"
+check "GET /domains count" "$domain_count" "19"
 
 # POST /check — validation rejects unknown domain key (no API key needed)
 bad_status=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/check" \
